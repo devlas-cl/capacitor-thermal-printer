@@ -6,9 +6,9 @@ Documento de referencia del adapter. Actualizar cuando se agregue un transporte 
 
 | Transporte | Estado | Implementación | Notas |
 |---|---|---|---|
-| **USB (OTG)** | ✅ Implementado | `UsbTransport.kt` — `UsbManager` puro | Requiere adaptador OTG real (no todos los USB-A→C lo son). Permiso por dispositivo vía diálogo del sistema. |
-| **TCP / LAN / WiFi** | ✅ Implementado | `TcpTransport.kt` — `Socket` puro | Raw 9100 (JetDirect). "WiFi" e "impresora de red" son el mismo transporte. |
-| **Bluetooth SPP** | ✅ Implementado | `BluetoothTransport.kt` — `BluetoothSocket` RFCOMM | Solo dispositivos emparejados. Conexión por trabajo (~1-2 s de latencia); pool keep-alive si molesta en caja. |
+| **USB (OTG)** | ✅ Validado en hardware real (2026-07-06) | `UsbTransport.kt` — `UsbManager` puro | Requiere adaptador OTG real (no todos los USB-A→C lo son). Permiso por dispositivo vía diálogo del sistema — Android lo revoca al re-enchufar o reinstalar la app; el consumidor debe re-pedirlo y reintentar (ver useAndroidUsbPrinter del POS). |
+| **TCP / LAN / WiFi** | ✅ Implementado (sin validar en hardware) | `TcpTransport.kt` — `Socket` puro | Raw 9100 (JetDirect). "WiFi" e "impresora de red" son el mismo transporte. |
+| **Bluetooth SPP** | ✅ Validado en hardware real (2026-07-06) | `BluetoothTransport.kt` — `BluetoothSocket` RFCOMM | Solo dispositivos emparejados. Conexión por trabajo (~1-2 s de latencia); pool keep-alive si molesta en caja. |
 | **Serial RS232** | ⏳ Roadmap | Requiere [mik3y/usb-serial-for-android](https://github.com/mik3y/usb-serial-for-android) | Solo aplica a dongles USB-serial (FTDI/CH340/PL2303). Las "impresoras serie" reales llegan por BT-SPP o USB, ya cubiertos. Agregar solo cuando un cliente tenga ese hardware. |
 | **BLE** | ❌ Descartado | — | Las térmicas POS usan BT clásico (SPP), no BLE. Los pocos modelos BLE no justifican la complejidad GATT. |
 | **iOS** | ❌ Sin soporte | — | iOS no tiene API de USB host ni SPP (solo MFi/BLE). TCP sería posible si algún día existe app iOS — el diseño del plugin lo permite sin romper la API. |
