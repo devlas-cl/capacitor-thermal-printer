@@ -48,5 +48,5 @@ Se evaluaron a fondo (código fuente leído, no solo READMEs) las opciones exist
 
 - [ ] **Serial RS232** vía `usb-serial-for-android` — cuando exista un cliente con ese hardware.
 - [ ] **Keep-alive opcional BT** — pool de sockets con TTL si la latencia por ticket molesta en caja.
-- [ ] **Migrar el BT del POS Devlas** de `@e-is/capacitor-bluetooth-serial` (parchado) a este plugin — elimina el parche de node_modules.
+- [x] **Migrar el BT del POS Devlas** de `@e-is/capacitor-bluetooth-serial` (parchado) a este plugin — hecho (2026-07-06): el POS eliminó esa dependencia y su parche de node_modules; `useAndroidBtPrinter` ahora usa el transporte `bluetooth` de este plugin con las mismas keys de configuración.
 - [ ] **iOS TCP** — solo si algún día hay app iOS.
