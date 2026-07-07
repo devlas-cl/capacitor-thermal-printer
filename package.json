@@ -1,0 +1,71 @@
+{
+  "name": "@devlas/capacitor-thermal-printer",
+  "version": "0.1.0",
+  "description": "Adaptador universal de impresión térmica ESC/POS para Capacitor Android: USB (OTG), TCP/LAN/WiFi y Bluetooth SPP con una sola API de bytes crudos.",
+  "main": "dist/esm/index.js",
+  "module": "dist/esm/index.js",
+  "types": "dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/esm/index.d.ts",
+      "import": "./dist/esm/index.js",
+      "default": "./dist/esm/index.js"
+    }
+  },
+  "files": [
+    "android/src/main/",
+    "android/build.gradle",
+    "dist/",
+    "src/",
+    "docs/"
+  ],
+  "capacitor": {
+    "android": {
+      "src": "android"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rimraf dist",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run build"
+  },
+  "author": "Devlas SpA <ti@devlas.cl> (https://devlas.cl)",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devlas-cl/capacitor-thermal-printer.git"
+  },
+  "bugs": {
+    "url": "https://github.com/devlas-cl/capacitor-thermal-printer/issues"
+  },
+  "homepage": "https://github.com/devlas-cl/capacitor-thermal-printer#readme",
+  "keywords": [
+    "capacitor",
+    "capacitor-plugin",
+    "thermal-printer",
+    "impresora-termica",
+    "esc-pos",
+    "escpos",
+    "usb",
+    "otg",
+    "tcp",
+    "lan",
+    "wifi",
+    "bluetooth",
+    "spp",
+    "android",
+    "pos",
+    "point-of-sale",
+    "punto-de-venta",
+    "boleta",
+    "ticket"
+  ],
+  "peerDependencies": {
+    "@capacitor/core": ">=5.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/core": "^8.0.0",
+    "typescript": "~5.7.0"
+  },
+  "license": "MIT"
+}
