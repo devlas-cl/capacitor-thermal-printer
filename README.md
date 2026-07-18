@@ -1,12 +1,13 @@
 # @devlas/capacitor-thermal-printer
 
-Adaptador universal de impresión térmica **ESC/POS** para Capacitor (Android): **USB (OTG)**, **TCP/LAN/WiFi** y **Bluetooth SPP** con una sola API de bytes crudos.
+Adaptador universal de impresión térmica **ESC/POS** para Capacitor: **USB (OTG)**, **TCP/LAN/WiFi** y **Bluetooth SPP** en Android; **TCP/LAN/WiFi** en iOS — una sola API de bytes crudos en ambas plataformas.
 
 - **Bytes crudos, no formateo**: la app codifica el ticket ESC/POS (con su propio encoder) y el plugin solo lo transporta. Así el mismo encoder sirve para Electron, Web Serial, WebUSB y esta app nativa.
 - **Stateless**: cada `print()` conecta → escribe → cierra. Sin estado de conexión que se corrompa.
-- **Sin dependencias nativas**: `UsbManager`, `Socket` y `BluetoothSocket` del framework Android, nada más.
+- **Sin dependencias nativas**: `UsbManager`/`Socket`/`BluetoothSocket` en Android, `Network.framework` en iOS — nada más.
 - **Permisos modernos**: flujo USB compatible con Android 12/14+ (`FLAG_MUTABLE` + intent explícito + `RECEIVER_NOT_EXPORTED`), `BLUETOOTH_CONNECT` runtime en API 31+.
 - **Base64 en el bridge**: los bytes viajan como base64 — sin corrupción UTF-8 (el bug clásico de los plugins BT de la comunidad).
+- **iOS solo TCP**: USB y Bluetooth SPP requieren certificación MFi de Apple (no es un tema de código) — ver [docs/TRANSPORTES.md](docs/TRANSPORTES.md).
 
 > Matriz de transportes, librerías evaluadas y decisiones de diseño: [docs/TRANSPORTES.md](docs/TRANSPORTES.md)
 
@@ -15,9 +16,11 @@ Adaptador universal de impresión térmica **ESC/POS** para Capacitor (Android):
 ```bash
 npm i @devlas/capacitor-thermal-printer
 npx cap sync android
+npx cap sync ios
 ```
 
-Sin pasos extra: no requiere JitPack ni repositorios Maven adicionales.
+Android: sin pasos extra, no requiere JitPack ni repositorios Maven adicionales.
+iOS: agrega `NSLocalNetworkUsageDescription` al `Info.plist` de tu app (iOS pide permiso de "red local" la primera vez que se usa TCP).
 
 ## API
 
@@ -89,8 +92,8 @@ await ThermalPrinter.print({ transport: 'bluetooth', address: '66:22:...', data:
 | Plataforma | Estado |
 |---|---|
 | Android (Capacitor WebView) | ✅ usb / tcp / bluetooth |
+| iOS (Capacitor WebView) | ✅ tcp — ❌ usb / bluetooth (requieren MFi, ver [docs/TRANSPORTES.md](docs/TRANSPORTES.md)) |
 | Web | ❌ stub — en navegador usa WebUSB / Web Serial directamente |
-| iOS | ❌ sin USB host ni SPP; ver [docs/TRANSPORTES.md](docs/TRANSPORTES.md) |
 
 ## Publicar
 

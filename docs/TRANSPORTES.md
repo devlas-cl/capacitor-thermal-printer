@@ -11,7 +11,8 @@ Documento de referencia del adapter. Actualizar cuando se agregue un transporte 
 | **Bluetooth SPP** | ✅ Validado en hardware real (2026-07-06) | `BluetoothTransport.kt` — `BluetoothSocket` RFCOMM | Solo dispositivos emparejados. Conexión por trabajo (~1-2 s de latencia); pool keep-alive si molesta en caja. |
 | **Serial RS232** | ⏳ Roadmap | Requiere [mik3y/usb-serial-for-android](https://github.com/mik3y/usb-serial-for-android) | Solo aplica a dongles USB-serial (FTDI/CH340/PL2303). Las "impresoras serie" reales llegan por BT-SPP o USB, ya cubiertos. Agregar solo cuando un cliente tenga ese hardware. |
 | **BLE** | ❌ Descartado | — | Las térmicas POS usan BT clásico (SPP), no BLE. Los pocos modelos BLE no justifican la complejidad GATT. |
-| **iOS** | ❌ Sin soporte | — | iOS no tiene API de USB host ni SPP (solo MFi/BLE). TCP sería posible si algún día existe app iOS — el diseño del plugin lo permite sin romper la API. |
+| **iOS — TCP** | ✅ Implementado (2026-07-18) | `TcpTransport.swift` — `Network.framework` (`NWConnection`) | Mismo contrato de API que Android (`print({transport:'tcp', host, port, data})`). Requiere `NSLocalNetworkUsageDescription` en el Info.plist de la app host (iOS pide permiso de "red local" la primera vez). |
+| **iOS — USB / Bluetooth SPP** | ❌ Sin soporte | — | Requieren el programa **MFi** (Made for iPhone) de Apple vía `ExternalAccessory` — es una certificación de hardware del fabricante de la impresora, no algo que se resuelva con código ni con la membresía de Developer Program. `list`/`requestPermission`/`print` devuelven `unavailable` explícito para estos transportes en iOS. |
 
 ## Por qué existe este plugin (y no una librería de terceros)
 
@@ -49,4 +50,4 @@ Se evaluaron a fondo (código fuente leído, no solo READMEs) las opciones exist
 - [ ] **Serial RS232** vía `usb-serial-for-android` — cuando exista un cliente con ese hardware.
 - [ ] **Keep-alive opcional BT** — pool de sockets con TTL si la latencia por ticket molesta en caja.
 - [x] **Migrar el BT del POS Devlas** de `@e-is/capacitor-bluetooth-serial` (parchado) a este plugin — hecho (2026-07-06): el POS eliminó esa dependencia y su parche de node_modules; `useAndroidBtPrinter` ahora usa el transporte `bluetooth` de este plugin con las mismas keys de configuración.
-- [ ] **iOS TCP** — solo si algún día hay app iOS.
+- [x] **iOS TCP** — hecho (2026-07-18): `TcpTransport.swift` vía `Network.framework`. USB/Bluetooth SPP en iOS quedan fuera de alcance (requieren certificación MFi, no es un tema de código).
