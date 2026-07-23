@@ -29,6 +29,8 @@ class UsbTransport(private val context: Context) {
         private const val ACTION_USB_PERMISSION = "app.devlas.plugins.thermalprinter.USB_PERMISSION"
         private const val CHUNK_SIZE = 4096
         private const val TRANSFER_TIMEOUT_MS = 3000
+        /** Corto a propósito: una impresora que no soporta DLE EOT nunca responde. */
+        private const val STATUS_READ_TIMEOUT_MS = 800
     }
 
     private val usbManager: UsbManager?
@@ -113,6 +115,58 @@ class UsbTransport(private val context: Context) {
             try { connection.releaseInterface(iface) } catch (_: Exception) { /* best effort */ }
             connection.close()
         }
+    }
+
+    /**
+     * Consulta de estado. Necesita un endpoint bulk IN: muchas térmicas USB
+     * genéricas sólo declaran el OUT, y ahí no hay forma de leer la respuesta
+     * — se devuelve todo null y la app lo trata como "no soportado".
+     */
+    fun status(vendorId: Int?, productId: Int?): List<Int?> {
+        val manager = usbManager
+            ?: throw PrinterException("unavailable", "USB no disponible en este dispositivo")
+        val device = findDevice(manager, vendorId, productId)
+            ?: throw PrinterException("not_found", "No se encontró una impresora USB conectada")
+        if (!manager.hasPermission(device)) {
+            throw PrinterException("permission_denied", "Sin permiso USB — llama a requestPermission() primero")
+        }
+        val (iface, endpoint) = findPrinterInterface(device)
+            ?: throw PrinterException("not_found", "El dispositivo no tiene endpoint de salida (bulk OUT)")
+        val inEndpoint = bulkInEndpoint(iface) ?: return listOf(null, null, null, null)
+
+        val connection = manager.openDevice(device)
+            ?: throw PrinterException("connect_failed", "No se pudo abrir el dispositivo USB")
+        try {
+            if (!connection.claimInterface(iface, true)) {
+                throw PrinterException("connect_failed", "No se pudo reclamar la interfaz USB")
+            }
+            val buffer = ByteArray(8)
+            return listOf(
+                PrinterStatus.N_PRINTER,
+                PrinterStatus.N_OFFLINE,
+                PrinterStatus.N_ERROR,
+                PrinterStatus.N_PAPER,
+            ).map { n ->
+                val query = PrinterStatus.query(n)
+                val sent = connection.bulkTransfer(endpoint, query, query.size, TRANSFER_TIMEOUT_MS)
+                if (sent < 0) return@map null
+                val read = connection.bulkTransfer(inEndpoint, buffer, buffer.size, STATUS_READ_TIMEOUT_MS)
+                if (read > 0) buffer[0].toInt() and 0xFF else null
+            }
+        } finally {
+            try { connection.releaseInterface(iface) } catch (_: Exception) { /* best effort */ }
+            connection.close()
+        }
+    }
+
+    private fun bulkInEndpoint(iface: UsbInterface): UsbEndpoint? {
+        for (j in 0 until iface.endpointCount) {
+            val ep = iface.getEndpoint(j)
+            if (ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK && ep.direction == UsbConstants.USB_DIR_IN) {
+                return ep
+            }
+        }
+        return null
     }
 
     private fun findDevice(manager: UsbManager, vendorId: Int?, productId: Int?): UsbDevice? {

@@ -41,7 +41,9 @@ Se evaluaron a fondo (código fuente leído, no solo READMEs) las opciones exist
 
 1. **Bytes crudos, encoder en la app.** El plugin no sabe qué es una boleta. `generarEscPosTicketBoleta()` (o cualquier encoder) vive en la app y se reusa en todas las plataformas.
 2. **Stateless por trabajo.** Conectar→escribir→cerrar en cada `print()`. Elimina toda la clase de bugs de "conexión zombie" (la causa del doble mecanismo inconsistente de atomsolution). El costo es latencia de reconexión BT (~1-2 s); si molesta, el roadmap contempla keep-alive opcional.
-3. **Un solo hilo ejecutor.** Serializa trabajos (nunca dos impresiones simultáneas al mismo dispositivo) y saca el I/O bloqueante del main thread (obligatorio para TCP: `NetworkOnMainThreadException`).
+3. **Un ejecutor de un hilo por destino.** Serializa trabajos **a la misma impresora** (nunca dos impresiones simultáneas al mismo dispositivo) y saca el I/O bloqueante del main thread (obligatorio para TCP: `NetworkOnMainThreadException`).
+
+   La clave de destino es `tcp:host:port` / `usb:vid:pid` / `bt:MAC`. Un ejecutor **global** sería incorrecto en escenarios multi-impresora: la comanda a una cocina apagada retendría la boleta del cliente durante los 4 s de `CONNECT_TIMEOUT_MS`, más el `Thread.sleep` post-escritura (hasta 2 s). Con USB sin `vendorId`/`productId` el destino es ambiguo ("la primera detectada"), así que esas llamadas comparten una fila (`usb:auto`).
 4. **Códigos de error estables** (`unavailable`, `not_found`, `permission_denied`, `connect_failed`, `write_failed`) — la app mapea a mensajes de usuario sin parsear strings.
 5. **Sin auto-prompt de permiso dentro de `print()`.** Si falta permiso USB, rechaza con `permission_denied`; el flujo de configuración (Ajustes) llama a `requestPermission()` explícitamente. Una venta nunca se bloquea en un diálogo inesperado.
 

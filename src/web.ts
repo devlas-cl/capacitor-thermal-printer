@@ -1,5 +1,10 @@
 import { WebPlugin } from '@capacitor/core'
-import type { PrinterDevice, PrintTarget, ThermalPrinterPlugin } from './definitions'
+import type {
+  PrinterDevice,
+  PrinterStatusResult,
+  PrintTarget,
+  ThermalPrinterPlugin,
+} from './definitions'
 
 /**
  * Stub web: este plugin es Android-nativo. En navegador usa las APIs del
@@ -16,6 +21,10 @@ export class ThermalPrinterWeb extends WebPlugin implements ThermalPrinterPlugin
   }
 
   async print(_options: PrintTarget & { data: string }): Promise<void> {
+    throw this.unimplemented('Solo Android. En navegador usa WebUSB o Web Serial.')
+  }
+
+  async status(_options: PrintTarget): Promise<PrinterStatusResult> {
     throw this.unimplemented('Solo Android. En navegador usa WebUSB o Web Serial.')
   }
 }

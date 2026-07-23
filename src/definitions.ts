@@ -53,6 +53,33 @@ export type PrintTarget = UsbTarget | TcpTarget | BluetoothTarget
  * `unavailable` | `not_found` | `permission_denied` | `connect_failed`
  * | `write_failed` | `invalid_transport` | `invalid_data`
  */
+/**
+ * Estado en tiempo real de la impresora (`DLE EOT`).
+ *
+ * Todos los campos salvo `supported` son opcionales: la impresora contesta
+ * consulta por consulta y puede responder unas y otras no. Un campo ausente
+ * significa "no lo sé", nunca "está bien".
+ */
+export interface PrinterStatusResult {
+  /**
+   * `false` cuando la impresora no respondió ninguna consulta válida. Suele
+   * pasar en clones baratos y en USB sin endpoint bulk IN. Tratalo como
+   * "no puedo saber", no como "hay un problema".
+   */
+  supported: boolean;
+  /** `false` = la impresora está offline (tapa abierta, sin papel, error). */
+  online?: boolean;
+  paperOut?: boolean;
+  /** Rollo por acabarse — si la impresora trae ese sensor. */
+  paperNearEnd?: boolean;
+  coverOpen?: boolean;
+  cutterError?: boolean;
+  /** Error irrecuperable — requiere apagar y encender. */
+  fatalError?: boolean;
+  /** Auto-recuperable, típicamente cabezal sobrecalentado. */
+  recoverableError?: boolean;
+}
+
 export interface ThermalPrinterPlugin {
   /**
    * Lista dispositivos del transporte. USB: todos los conectados con metadata.
@@ -71,7 +98,24 @@ export interface ThermalPrinterPlugin {
   /**
    * Envía bytes ESC/POS crudos codificados en base64.
    * Stateless: conecta → escribe (chunked) → cierra. Sin estado que corromper.
-   * Los trabajos se serializan en un solo hilo — nunca dos impresiones concurrentes.
+   *
+   * Concurrencia: los trabajos se serializan **por impresora de destino**. Dos
+   * `print()` al mismo destino nunca se solapan (no se entrelazan dos tickets en
+   * el mismo papel), pero destinos distintos imprimen en paralelo — una impresora
+   * caída no retrasa a las demás mientras agota su timeout de conexión.
    */
   print(options: PrintTarget & { data: string }): Promise<void>
+
+  /**
+   * Consulta el estado en tiempo real: papel, tapa, errores.
+   *
+   * Se serializa en la misma fila que `print()` al mismo destino — preguntar
+   * mientras se escribe un ticket mezclaría los bytes en la línea.
+   *
+   * ⚠️ **No todas las térmicas implementan `DLE EOT`.** Las que no, o no
+   * responden (se resuelve con el timeout y `supported: false`), o interpretan
+   * la consulta como datos y **escupen basura en el papel**. Probalo con la
+   * impresora real antes de llamarlo en un flujo automático.
+   */
+  status(options: PrintTarget): Promise<PrinterStatusResult>
 }
