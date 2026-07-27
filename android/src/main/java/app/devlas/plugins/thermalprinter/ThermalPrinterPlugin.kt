@@ -1,6 +1,7 @@
 package app.devlas.plugins.thermalprinter
 
 import android.Manifest
+import android.content.Context
 import android.util.Base64
 import com.getcapacitor.JSObject
 import com.getcapacitor.PermissionState
@@ -53,6 +54,9 @@ class ThermalPrinterPlugin : Plugin() {
         }
         "tcp" -> "tcp:${call.getString("host")}:${call.getInt("port") ?: 9100}"
         "bluetooth" -> "bt:${call.getString("address")}"
+        // El túnel se serializa por (host, impresora remota): dos trabajos a la
+        // misma impresora del mismo host no se solapan; a hosts distintos, sí.
+        "tunnel" -> "tunnel:${call.getString("host")}:${call.getInt("port") ?: TunnelTransport.DEFAULT_PORT}:${call.getString("printerId")}"
         else -> "invalid"
     }
 
@@ -60,12 +64,22 @@ class ThermalPrinterPlugin : Plugin() {
     private val tcp = TcpTransport()
     private val bluetooth by lazy { BluetoothTransport(context) }
     private val discovery by lazy { TcpDiscovery(context) }
+    private val tunnel = TunnelTransport()
+    private val tunnelDiscovery by lazy { TunnelDiscovery(context) }
+
+    // Modo host: servidor activo (o null), su id, y el mapeo id -> destino local
+    // que es la fuente de verdad de a dónde imprime cada trabajo entrante.
+    private var host: PrintHostServer? = null
+    private var currentHostId: String? = null
+    private val hostPrinters = ConcurrentHashMap<String, JSObject>()
 
     // Escaneo de red aparte del pool de impresión: no compite con los trabajos
     // en curso y un descubrimiento lento no retiene ninguna impresión.
     private val discoveryExecutor = Executors.newSingleThreadExecutor()
 
     override fun handleOnDestroy() {
+        host?.stop()
+        host = null
         executors.values.forEach { it.shutdown() }
         executors.clear()
         discoveryExecutor.shutdown()
@@ -147,7 +161,9 @@ class ThermalPrinterPlugin : Plugin() {
                 }
             }
             "tcp" -> call.resolve(JSObject().put("granted", true))
-            else -> call.reject("transport debe ser 'usb', 'tcp' o 'bluetooth'", "invalid_transport")
+            // El túnel no toca hardware local: el permiso lo resuelve el host.
+            "tunnel" -> call.resolve(JSObject().put("granted", true))
+            else -> call.reject("transport debe ser 'usb', 'tcp', 'bluetooth' o 'tunnel'", "invalid_transport")
         }
     }
 
@@ -222,7 +238,16 @@ class ThermalPrinterPlugin : Plugin() {
                             ?: throw PrinterException("not_found", "Falta 'address' para transporte bluetooth")
                         bluetooth.print(address, bytes)
                     }
-                    else -> throw PrinterException("invalid_transport", "transport debe ser 'usb', 'tcp' o 'bluetooth'")
+                    "tunnel" -> {
+                        val tHost = call.getString("host")
+                            ?: throw PrinterException("connect_failed", "Falta 'host' para transporte tunnel")
+                        val printerId = call.getString("printerId")
+                            ?: throw PrinterException("not_found", "Falta 'printerId' para transporte tunnel")
+                        // Se reenvía el base64 original tal cual — el host lo imprime
+                        // en su impresora local mapeada por printerId.
+                        tunnel.print(tHost, call.getInt("port") ?: TunnelTransport.DEFAULT_PORT, printerId, call.getString("token"), data)
+                    }
+                    else -> throw PrinterException("invalid_transport", "transport debe ser 'usb', 'tcp', 'bluetooth' o 'tunnel'")
                 }
                 call.resolve()
             } catch (e: PrinterException) {
@@ -231,5 +256,170 @@ class ThermalPrinterPlugin : Plugin() {
                 call.reject(e.message ?: "Error de impresión", "write_failed")
             }
         }
+    }
+
+    // ── requestPermission: tunnel nunca requiere permiso del SO ──────────────
+
+    // (el `when` de requestPermission agrega el caso 'tunnel' más arriba)
+
+    // ── Modo host ────────────────────────────────────────────────────────────
+
+    @PluginMethod
+    fun startPrintHost(call: PluginCall) {
+        val name = call.getString("name") ?: "Caja"
+        val port = call.getInt("port") ?: TunnelTransport.DEFAULT_PORT
+        val token = call.getString("token")
+        val hostId = call.getString("hostId") ?: "wbhost-${System.currentTimeMillis()}"
+        val printersArr = call.getArray("printers")
+        if (printersArr == null) {
+            call.reject("Falta 'printers'", "invalid_data")
+            return
+        }
+
+        hostPrinters.clear()
+        val meta = mutableListOf<Pair<String, String>>()
+        try {
+            for (i in 0 until printersArr.length()) {
+                val p = JSObject.fromJSONObject(printersArr.getJSONObject(i))
+                val id = p.getString("id") ?: continue
+                val label = p.getString("label") ?: id
+                val target = JSObject.fromJSONObject(p.getJSONObject("target"))
+                hostPrinters[id] = target
+                meta.add(id to label)
+            }
+        } catch (e: Exception) {
+            call.reject("'printers' mal formado: ${e.message}", "invalid_data")
+            return
+        }
+
+        host?.stop()
+
+        val server = PrintHostServer(context, hostId, name, token, meta, object : HostJobHandler {
+            override fun print(printerId: String, bytes: ByteArray) {
+                val target = hostPrinters[printerId]
+                    ?: throw PrinterException("not_found", "Impresora '$printerId' no publicada")
+                // Va por la misma fila que las impresiones locales a ese destino,
+                // así un trabajo remoto y uno local nunca se entrelazan en el papel.
+                // Se usa execute + latch (no submit) para evitar la ambigüedad
+                // Runnable/Callable de Kotlin con lambdas que devuelven Unit.
+                val error = arrayOfNulls<Throwable>(1)
+                val latch = java.util.concurrent.CountDownLatch(1)
+                executorFor(targetKeyForTarget(target)).execute {
+                    try {
+                        printToTarget(target, bytes)
+                    } catch (t: Throwable) {
+                        error[0] = t
+                    } finally {
+                        latch.countDown()
+                    }
+                }
+                latch.await()
+                error[0]?.let { t ->
+                    if (t is PrinterException) throw t
+                    throw PrinterException("write_failed", t.message ?: "Error al imprimir")
+                }
+            }
+
+            override fun onJob(printerId: String, ok: Boolean, error: String?, from: String?) {
+                val ev = JSObject().put("printerId", printerId).put("ok", ok)
+                if (error != null) ev.put("error", error)
+                if (from != null) ev.put("from", from)
+                notifyListeners("printHostJob", ev)
+            }
+        })
+
+        try {
+            server.start(port)
+        } catch (e: Exception) {
+            call.reject(e.message ?: "No se pudo iniciar el modo host", "unavailable")
+            return
+        }
+
+        host = server
+        currentHostId = hostId
+        call.resolve(
+            JSObject()
+                .put("hostId", hostId)
+                .put("host", localIp() ?: "")
+                .put("port", server.boundPort),
+        )
+    }
+
+    @PluginMethod
+    fun stopPrintHost(call: PluginCall) {
+        host?.stop()
+        host = null
+        currentHostId = null
+        hostPrinters.clear()
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun printHostStatus(call: PluginCall) {
+        val h = host
+        val res = JSObject().put("running", h != null)
+        if (h != null) {
+            res.put("hostId", currentHostId ?: "")
+            res.put("host", localIp() ?: "")
+            res.put("port", h.boundPort)
+            res.put("clients", h.clientCount())
+        }
+        call.resolve(res)
+    }
+
+    @PluginMethod
+    fun discoverHosts(call: PluginCall) {
+        val timeoutMs = call.getInt("timeoutMs") ?: 4000
+        discoveryExecutor.execute {
+            try {
+                call.resolve(JSObject().put("hosts", tunnelDiscovery.discover(timeoutMs)))
+            } catch (e: Exception) {
+                call.reject(e.message ?: "Error descubriendo hosts", "unavailable")
+            }
+        }
+    }
+
+    // ── Helpers del modo host ────────────────────────────────────────────────
+
+    /** Clave de serialización de un destino publicado (mismo formato que targetKey). */
+    private fun targetKeyForTarget(t: JSObject): String = when (t.getString("transport")) {
+        "usb" -> {
+            val vid = intOrNull(t, "vendorId")
+            val pid = intOrNull(t, "productId")
+            if (vid != null && pid != null) "usb:$vid:$pid" else "usb:auto"
+        }
+        "tcp" -> "tcp:${t.getString("host")}:${intOrNull(t, "port") ?: 9100}"
+        "bluetooth" -> "bt:${t.getString("address")}"
+        else -> "invalid"
+    }
+
+    /** Imprime en el destino local publicado. Se ejecuta dentro de su fila. */
+    private fun printToTarget(t: JSObject, bytes: ByteArray) {
+        when (t.getString("transport")) {
+            "usb" -> usb.print(intOrNull(t, "vendorId"), intOrNull(t, "productId"), bytes)
+            "tcp" -> {
+                val h = t.getString("host")
+                    ?: throw PrinterException("connect_failed", "Falta 'host' en destino publicado")
+                tcp.print(h, intOrNull(t, "port") ?: 9100, bytes)
+            }
+            "bluetooth" -> {
+                val addr = t.getString("address")
+                    ?: throw PrinterException("not_found", "Falta 'address' en destino publicado")
+                bluetooth.print(addr, bytes)
+            }
+            else -> throw PrinterException("invalid_transport", "Transporte inválido en destino publicado")
+        }
+    }
+
+    private fun intOrNull(o: JSObject, key: String): Int? =
+        if (o.has(key)) o.getInt(key) else null
+
+    /** IP WiFi del dispositivo, para reportar en qué dirección quedó escuchando. */
+    @Suppress("DEPRECATION")
+    private fun localIp(): String? {
+        val wifi = context.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager ?: return null
+        val ip = wifi.connectionInfo?.ipAddress ?: 0
+        if (ip == 0) return null
+        return "${ip and 0xff}.${ip shr 8 and 0xff}.${ip shr 16 and 0xff}.${ip shr 24 and 0xff}"
     }
 }

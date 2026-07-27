@@ -2,6 +2,9 @@ import { WebPlugin } from '@capacitor/core'
 import type {
   PrinterDevice,
   DiscoveredNetworkPrinter,
+  DiscoveredHost,
+  PrintHostStatus,
+  PublishedHostPrinter,
   PrinterStatusResult,
   PrintTarget,
   ThermalPrinterPlugin,
@@ -30,6 +33,28 @@ export class ThermalPrinterWeb extends WebPlugin implements ThermalPrinterPlugin
   }
 
   async discover(): Promise<{ devices: DiscoveredNetworkPrinter[] }> {
+    throw this.unimplemented('Solo Android. En navegador el descubrimiento LAN no está disponible.')
+  }
+
+  async startPrintHost(_options: {
+    port?: number
+    token?: string
+    name: string
+    hostId?: string
+    printers: PublishedHostPrinter[]
+  }): Promise<{ hostId: string; host: string; port: number }> {
+    throw this.unimplemented('Solo Android. El navegador no puede escuchar un socket entrante.')
+  }
+
+  async stopPrintHost(): Promise<void> {
+    throw this.unimplemented('Solo Android.')
+  }
+
+  async printHostStatus(): Promise<PrintHostStatus> {
+    return { running: false }
+  }
+
+  async discoverHosts(): Promise<{ hosts: DiscoveredHost[] }> {
     throw this.unimplemented('Solo Android. En navegador el descubrimiento LAN no está disponible.')
   }
 }

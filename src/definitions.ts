@@ -55,7 +55,62 @@ export interface BluetoothTarget {
   address: string
 }
 
-export type PrintTarget = UsbTarget | TcpTarget | BluetoothTarget
+/**
+ * Tunel a otra terminal de la LAN que corre en modo host (ver `startPrintHost`).
+ * Este dispositivo no imprime: manda los bytes al host y el host los imprime en
+ * su impresora local. Permite, p. ej., imprimir en una impresora USB de otra
+ * terminal, imposible de alcanzar directo.
+ *
+ * A diferencia de wss (que exigiria un cert de confianza), el cliente es nativo
+ * y abre un socket LAN plano: sin TLS ni cert instalado. La autorizacion es un
+ * `token` a nivel app con scope de negocio.
+ */
+export interface TunnelTarget {
+  transport: 'tunnel'
+  /** Direccion LAN actual del host. */
+  host: string
+  /** Puerto del host de impresion. Default: 9110. */
+  port?: number
+  /** Id estable del host (sobrevive a cambios de IP). Opcional para imprimir. */
+  hostId?: string
+  /** Que impresora del host: coincide con `PublishedHostPrinter.id`. */
+  printerId: string
+  /** Token de autorizacion que espera el host. */
+  token?: string
+}
+
+export type PrintTarget = UsbTarget | TcpTarget | BluetoothTarget | TunnelTarget
+
+/** Una impresora local que este dispositivo publica al correr como host. */
+export interface PublishedHostPrinter {
+  /** Id estable con que los clientes la referencian (p. ej. el rol). */
+  id: string
+  /** Nombre para mostrar en el cliente ("Boletas", "Comandas"). */
+  label: string
+  /** El destino local concreto donde el host imprime este id (usb/tcp/bt). */
+  target: UsbTarget | TcpTarget | BluetoothTarget
+}
+
+/** Un host de impresion descubierto en la LAN por mDNS. */
+export interface DiscoveredHost {
+  hostId: string
+  name: string
+  host: string
+  port: number
+  /** Version del protocolo del tunel que habla el host. */
+  proto: number
+  printers: Array<{ id: string; label: string }>
+}
+
+/** Estado del modo host de este dispositivo. */
+export interface PrintHostStatus {
+  running: boolean
+  hostId?: string
+  host?: string
+  port?: number
+  /** Clientes con socket abierto en este momento. */
+  clients?: number
+}
 
 /**
  * Códigos de error estables (segundo argumento de reject, `error.code` en JS):
@@ -137,4 +192,49 @@ export interface ThermalPrinterPlugin {
    * impresora real antes de llamarlo en un flujo automático.
    */
   status(options: PrintTarget): Promise<PrinterStatusResult>
+
+  // ── Modo host: compartir las impresoras locales en la LAN ────────────────
+
+  /**
+   * Levanta el servidor de impresion: escucha en la LAN, se anuncia por mDNS
+   * (`_wbprint._tcp`) y, al recibir un trabajo, lo imprime en la impresora local
+   * mapeada por `printerId` — todo nativo, sin volver al WebView, asi funciona
+   * aunque la app este en segundo plano.
+   *
+   * Idempotente: volver a llamarlo con otra config reinicia el servidor. El
+   * mapeo `printers` es la fuente de verdad de que se publica y a donde imprime.
+   */
+  startPrintHost(options: {
+    /** Puerto donde escuchar. Default: 9110. */
+    port?: number
+    /** Token que los clientes deben presentar. Si se omite, no exige auth. */
+    token?: string
+    /** Nombre con que se anuncia el host en mDNS. */
+    name: string
+    /** Id estable del host. Si se omite, el plugin genera uno persistente. */
+    hostId?: string
+    /** Impresoras que se publican y su destino local. */
+    printers: PublishedHostPrinter[]
+  }): Promise<{ hostId: string; host: string; port: number }>
+
+  /** Apaga el servidor de impresion y deja de anunciarse. */
+  stopPrintHost(): Promise<void>
+
+  /** Estado actual del modo host. */
+  printHostStatus(): Promise<PrintHostStatus>
+
+  /**
+   * Descubre hosts de impresion en la LAN (mDNS `_wbprint._tcp`). Solo el
+   * dispositivo que esta EN la red los ve. `timeoutMs` acota el escaneo (4s).
+   */
+  discoverHosts(options?: { timeoutMs?: number }): Promise<{ hosts: DiscoveredHost[] }>
+
+  /**
+   * Evento por cada trabajo que el host recibe e imprime — para el log en vivo
+   * de la pantalla de Ajustes. `ok` refleja si la impresion local salio bien.
+   */
+  addListener(
+    eventName: 'printHostJob',
+    listener: (job: { printerId: string; ok: boolean; error?: string; from?: string }) => void,
+  ): Promise<import('@capacitor/core').PluginListenerHandle>
 }
