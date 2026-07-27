@@ -7,6 +7,11 @@
     <!-- TCP/LAN/WiFi (raw 9100) -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Descubrimiento de impresoras de red: mDNS (NSD) + leer la IP/subred WiFi
+         para el barrido de la /24 local. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <!-- Bluetooth SPP: legacy hasta API 30, BLUETOOTH_CONNECT runtime desde API 31 -->
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />

@@ -26,6 +26,15 @@ export interface PrinterDevice {
   address?: string
 }
 
+/** Impresora de red descubierta en la LAN (mDNS / barrido). */
+export interface DiscoveredNetworkPrinter {
+  transport: 'tcp';
+  host: string;
+  port: number;
+  /** Nombre de mDNS si se anunció; si no, la propia IP. */
+  name: string;
+}
+
 export interface UsbTarget {
   transport: 'usb'
   /** Si se omiten vendorId/productId, usa la primera impresora USB detectada. */
@@ -87,6 +96,16 @@ export interface ThermalPrinterPlugin {
    * TCP no es listable — la IP la ingresa el usuario.
    */
   list(options: { transport: 'usb' | 'bluetooth' }): Promise<{ devices: PrinterDevice[] }>
+
+  /**
+   * Descubre impresoras de red en la LAN — el equivalente de red a `list`.
+   * Combina mDNS (nombres reales de las que se anuncian) con un barrido del
+   * puerto 9100 sobre la subred /24 (cubre las que no anuncian).
+   *
+   * Sólo el dispositivo que está EN la LAN puede hacerlo; un dashboard remoto
+   * no ve la red del local. `timeoutMs` acota la ventana de escaneo (default 4s).
+   */
+  discover(options: { transport: 'tcp'; timeoutMs?: number }): Promise<{ devices: DiscoveredNetworkPrinter[] }>
 
   /**
    * Pide el permiso del transporte. USB: diálogo del sistema por dispositivo

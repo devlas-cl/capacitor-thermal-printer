@@ -1,6 +1,6 @@
 {
   "name": "@devlas/capacitor-thermal-printer",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Adaptador universal de impresión térmica ESC/POS para Capacitor: USB (OTG), TCP/LAN/WiFi y Bluetooth SPP en Android; TCP/LAN/WiFi en iOS. Una sola API de bytes crudos.",
   "main": "dist/esm/index.js",
   "module": "dist/esm/index.js",

@@ -59,10 +59,39 @@ class ThermalPrinterPlugin : Plugin() {
     private val usb by lazy { UsbTransport(context) }
     private val tcp = TcpTransport()
     private val bluetooth by lazy { BluetoothTransport(context) }
+    private val discovery by lazy { TcpDiscovery(context) }
+
+    // Escaneo de red aparte del pool de impresión: no compite con los trabajos
+    // en curso y un descubrimiento lento no retiene ninguna impresión.
+    private val discoveryExecutor = Executors.newSingleThreadExecutor()
 
     override fun handleOnDestroy() {
         executors.values.forEach { it.shutdown() }
         executors.clear()
+        discoveryExecutor.shutdown()
+    }
+
+    // ── discover ─────────────────────────────────────────────────────────
+
+    /**
+     * Descubre impresoras de red en la LAN (mDNS + barrido de subred). Es el
+     * equivalente de red a `list('usb')`: el POS enumera lo que ve para que el
+     * dashboard lo ofrezca sin escribir IPs a mano.
+     */
+    @PluginMethod
+    fun discover(call: PluginCall) {
+        if (call.getString("transport") != "tcp") {
+            call.reject("discover sólo soporta transport 'tcp'", "invalid_transport")
+            return
+        }
+        val timeoutMs = call.getInt("timeoutMs") ?: 4000
+        discoveryExecutor.execute {
+            try {
+                call.resolve(JSObject().put("devices", discovery.discover(timeoutMs)))
+            } catch (e: Exception) {
+                call.reject(e.message ?: "Error descubriendo impresoras de red", "unavailable")
+            }
+        }
     }
 
     // ── list ─────────────────────────────────────────────────────────────

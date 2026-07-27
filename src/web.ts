@@ -1,6 +1,7 @@
 import { WebPlugin } from '@capacitor/core'
 import type {
   PrinterDevice,
+  DiscoveredNetworkPrinter,
   PrinterStatusResult,
   PrintTarget,
   ThermalPrinterPlugin,
@@ -26,5 +27,9 @@ export class ThermalPrinterWeb extends WebPlugin implements ThermalPrinterPlugin
 
   async status(_options: PrintTarget): Promise<PrinterStatusResult> {
     throw this.unimplemented('Solo Android. En navegador usa WebUSB o Web Serial.')
+  }
+
+  async discover(): Promise<{ devices: DiscoveredNetworkPrinter[] }> {
+    throw this.unimplemented('Solo Android. En navegador el descubrimiento LAN no está disponible.')
   }
 }
