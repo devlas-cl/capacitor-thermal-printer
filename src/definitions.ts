@@ -237,4 +237,14 @@ export interface ThermalPrinterPlugin {
     eventName: 'printHostJob',
     listener: (job: { printerId: string; ok: boolean; error?: string; from?: string }) => void,
   ): Promise<import('@capacitor/core').PluginListenerHandle>
+
+  /**
+   * Hotplug USB: se dispara cuando un dispositivo USB se conecta o desconecta.
+   * La app re-detecta y reporta sus impresoras al instante, sin re-escaneo
+   * manual ni volver al foreground. Solo nativo (Android); en web es no-op.
+   */
+  addListener(
+    eventName: 'usbDevicesChanged',
+    listener: (ev: { reason: 'attached' | 'detached' }) => void,
+  ): Promise<import('@capacitor/core').PluginListenerHandle>
 }

@@ -1,7 +1,12 @@
 package app.devlas.plugins.thermalprinter
 
 import android.Manifest
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbManager
+import android.os.Build
 import android.util.Base64
 import com.getcapacitor.JSObject
 import com.getcapacitor.PermissionState
@@ -77,12 +82,53 @@ class ThermalPrinterPlugin : Plugin() {
     // en curso y un descubrimiento lento no retiene ninguna impresión.
     private val discoveryExecutor = Executors.newSingleThreadExecutor()
 
+    // Hotplug USB: el sistema emite ATTACHED/DETACHED al conectar/desconectar un
+    // dispositivo USB. Reemitimos como `usbDevicesChanged` para que la app
+    // re-detecte y reporte sus impresoras al instante, sin re-escaneo manual ni
+    // volver al foreground.
+    private val usbHotplugReceiver = object : BroadcastReceiver() {
+        override fun onReceive(ctx: Context?, intent: Intent?) {
+            val action = intent?.action ?: return
+            if (action == UsbManager.ACTION_USB_DEVICE_ATTACHED ||
+                action == UsbManager.ACTION_USB_DEVICE_DETACHED
+            ) {
+                val ev = JSObject()
+                ev.put(
+                    "reason",
+                    if (action == UsbManager.ACTION_USB_DEVICE_ATTACHED) "attached" else "detached",
+                )
+                notifyListeners("usbDevicesChanged", ev)
+            }
+        }
+    }
+    private var usbReceiverRegistered = false
+
+    override fun load() {
+        val filter = IntentFilter().apply {
+            addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
+            addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
+        }
+        // API 33+ exige declarar exported/not-exported. Estos son broadcasts del
+        // sistema, así que EXPORTED.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(usbHotplugReceiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            context.registerReceiver(usbHotplugReceiver, filter)
+        }
+        usbReceiverRegistered = true
+    }
+
     override fun handleOnDestroy() {
         host?.stop()
         host = null
         executors.values.forEach { it.shutdown() }
         executors.clear()
         discoveryExecutor.shutdown()
+        if (usbReceiverRegistered) {
+            runCatching { context.unregisterReceiver(usbHotplugReceiver) }
+            usbReceiverRegistered = false
+        }
     }
 
     // ── discover ─────────────────────────────────────────────────────────
