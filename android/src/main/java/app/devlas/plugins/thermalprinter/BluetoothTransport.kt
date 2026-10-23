@@ -21,7 +21,27 @@ class BluetoothTransport(private val context: Context) {
     companion object {
         /** UUID estándar del Serial Port Profile. */
         private val SPP_UUID: UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-        private const val CHUNK_SIZE = 1024
+        /**
+         * Escritura pausada: CHUNK_SIZE bytes y luego CHUNK_GAP_MS. SPP no nos
+         * da control de flujo visible, y las térmicas baratas pierden bytes o
+         * abortan una imagen (`GS v 0`) cuando el flujo les llena el buffer o se
+         * corta a la mitad. Visto en Botánico (TELHOME 80 mm, 2026-10): la imagen
+         * de la boleta salió como metros de texto. 512 B cada 20 ms son ~25 KB/s:
+         * una boleta raster de 150 KB tarda ~6 s.
+         */
+        private const val CHUNK_SIZE = 512
+        private const val CHUNK_GAP_MS = 20L
+        /** Una impresora recién conectada puede perder los primeros bytes. */
+        private const val SETTLE_AFTER_CONNECT_MS = 150L
+        /**
+         * Espera después del último byte antes de cerrar, para que el cierre no
+         * corte la cola que sigue en la radio y en el buffer de la impresora.
+         * Crece con el trabajo: cerrar 2 s después de una imagen de 150 KB (el
+         * tope anterior) la cortaba.
+         */
+        private const val DRAIN_MIN_MS = 500L
+        private const val DRAIN_MAX_MS = 5000L
+        private const val DRAIN_BYTES_PER_MS = 32L
         /** Corto a propósito: una impresora que no soporta DLE EOT nunca responde. */
         private const val STATUS_READ_TIMEOUT_MS = 800L
     }
@@ -102,17 +122,19 @@ class BluetoothTransport(private val context: Context) {
             a.cancelDiscovery() // discovery activo degrada la conexión SPP
             device.createRfcommSocketToServiceRecord(SPP_UUID).use { socket ->
                 socket.connect()
+                Thread.sleep(SETTLE_AFTER_CONNECT_MS)
                 val out = socket.outputStream
                 var offset = 0
                 while (offset < bytes.size) {
                     val len = minOf(CHUNK_SIZE, bytes.size - offset)
                     out.write(bytes, offset, len)
+                    out.flush()
                     offset += len
+                    if (offset < bytes.size) Thread.sleep(CHUNK_GAP_MS)
                 }
-                out.flush()
                 // ponytail: conexión por trabajo (~1-2s de latencia BT por ticket);
                 // pool keep-alive si la latencia molesta en caja.
-                Thread.sleep(minOf(2000L, bytes.size / 16L))
+                Thread.sleep((bytes.size / DRAIN_BYTES_PER_MS).coerceIn(DRAIN_MIN_MS, DRAIN_MAX_MS))
             }
         } catch (e: SecurityException) {
             throw PrinterException("permission_denied", "Sin permiso BLUETOOTH_CONNECT")
