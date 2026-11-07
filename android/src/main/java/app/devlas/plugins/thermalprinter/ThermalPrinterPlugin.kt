@@ -23,7 +23,14 @@ import java.util.concurrent.Executors
 @CapacitorPlugin(
     name = "ThermalPrinter",
     permissions = [
-        Permission(alias = "bluetooth", strings = [Manifest.permission.BLUETOOTH_CONNECT])
+        Permission(alias = "bluetooth", strings = [Manifest.permission.BLUETOOTH_CONNECT]),
+        // BLE: buscar y conectar. Android 12+ usa los permisos Bluetooth nuevos;
+        // en 11 o menos el escaneo BLE exige ubicacion. Se elige el alias segun la version.
+        Permission(
+            alias = "bleScan",
+            strings = [Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT],
+        ),
+        Permission(alias = "bleLocation", strings = [Manifest.permission.ACCESS_FINE_LOCATION]),
     ]
 )
 class ThermalPrinterPlugin : Plugin() {
@@ -59,6 +66,7 @@ class ThermalPrinterPlugin : Plugin() {
         }
         "tcp" -> "tcp:${call.getString("host")}:${call.getInt("port") ?: 9100}"
         "bluetooth" -> "bt:${call.getString("address")}"
+        "ble" -> "ble:${call.getString("address")}"
         // El túnel se serializa por (host, impresora remota): dos trabajos a la
         // misma impresora del mismo host no se solapan; a hosts distintos, sí.
         "tunnel" -> "tunnel:${call.getString("host")}:${call.getInt("port") ?: TunnelTransport.DEFAULT_PORT}:${call.getString("printerId")}"
@@ -68,6 +76,7 @@ class ThermalPrinterPlugin : Plugin() {
     private val usb by lazy { UsbTransport(context) }
     private val tcp = TcpTransport()
     private val bluetooth by lazy { BluetoothTransport(context) }
+    private val ble by lazy { BleTransport(context) }
     private val discovery by lazy { TcpDiscovery(context) }
     private val tunnel = TunnelTransport()
     private val tunnelDiscovery by lazy { TunnelDiscovery(context) }
@@ -154,6 +163,51 @@ class ThermalPrinterPlugin : Plugin() {
         }
     }
 
+    // ── scan (BLE) ───────────────────────────────────────────────────────
+
+    private fun bleAlias(): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) "bleScan" else "bleLocation"
+
+    /**
+     * Busca impresoras BLE cercanas. Las BLE normalmente no estan emparejadas
+     * en el sistema, asi que `list('bluetooth')` no las ve: hay que escanear.
+     */
+    @PluginMethod
+    fun scan(call: PluginCall) {
+        if (call.getString("transport") != "ble") {
+            call.reject("scan solo soporta transport 'ble'", "invalid_transport")
+            return
+        }
+        if (getPermissionState(bleAlias()) != PermissionState.GRANTED) {
+            requestPermissionForAlias(bleAlias(), call, "bleScanCallback")
+            return
+        }
+        runBleScan(call)
+    }
+
+    @PermissionCallback
+    private fun bleScanCallback(call: PluginCall) {
+        if (getPermissionState(bleAlias()) == PermissionState.GRANTED) {
+            runBleScan(call)
+        } else {
+            call.reject("Permiso Bluetooth denegado", "permission_denied")
+        }
+    }
+
+    private fun runBleScan(call: PluginCall) {
+        val timeoutMs = (call.getInt("timeoutMs") ?: BleTransport.DEFAULT_SCAN_MS).coerceIn(1000, 30000)
+        // Hilo aparte del pool de impresion: un escaneo no retiene ningun ticket.
+        discoveryExecutor.execute {
+            try {
+                call.resolve(JSObject().put("devices", ble.scan(timeoutMs)))
+            } catch (e: PrinterException) {
+                call.reject(e.message, e.code)
+            } catch (e: Exception) {
+                call.reject(e.message ?: "Error buscando impresoras BLE", "unavailable")
+            }
+        }
+    }
+
     // ── list ─────────────────────────────────────────────────────────────
 
     @PluginMethod
@@ -167,7 +221,7 @@ class ThermalPrinterPlugin : Plugin() {
                 }
                 resolveBluetoothList(call)
             }
-            else -> call.reject("transport debe ser 'usb' o 'bluetooth'", "invalid_transport")
+            else -> call.reject("transport debe ser 'usb' o 'bluetooth' (para BLE usa scan)", "invalid_transport")
         }
     }
 
@@ -206,11 +260,23 @@ class ThermalPrinterPlugin : Plugin() {
                     requestPermissionForAlias("bluetooth", call, "bluetoothPermissionCallback")
                 }
             }
+            "ble" -> {
+                if (getPermissionState(bleAlias()) == PermissionState.GRANTED) {
+                    call.resolve(JSObject().put("granted", true))
+                } else {
+                    requestPermissionForAlias(bleAlias(), call, "blePermissionCallback")
+                }
+            }
             "tcp" -> call.resolve(JSObject().put("granted", true))
             // El túnel no toca hardware local: el permiso lo resuelve el host.
             "tunnel" -> call.resolve(JSObject().put("granted", true))
-            else -> call.reject("transport debe ser 'usb', 'tcp', 'bluetooth' o 'tunnel'", "invalid_transport")
+            else -> call.reject("transport debe ser 'usb', 'tcp', 'bluetooth', 'ble' o 'tunnel'", "invalid_transport")
         }
+    }
+
+    @PermissionCallback
+    private fun blePermissionCallback(call: PluginCall) {
+        call.resolve(JSObject().put("granted", getPermissionState(bleAlias()) == PermissionState.GRANTED))
     }
 
     @PermissionCallback
@@ -243,7 +309,12 @@ class ThermalPrinterPlugin : Plugin() {
                             ?: throw PrinterException("not_found", "Falta 'address' para transporte bluetooth")
                         bluetooth.status(address)
                     }
-                    else -> throw PrinterException("invalid_transport", "transport debe ser 'usb', 'tcp' o 'bluetooth'")
+                    "ble" -> {
+                        val address = call.getString("address")
+                            ?: throw PrinterException("not_found", "Falta 'address' para transporte ble")
+                        ble.status(address)
+                    }
+                    else -> throw PrinterException("invalid_transport", "transport debe ser 'usb', 'tcp', 'bluetooth' o 'ble'")
                 }
                 call.resolve(PrinterStatus.toJs(raw[0], raw[1], raw[2], raw[3]))
             } catch (e: PrinterException) {
@@ -283,6 +354,11 @@ class ThermalPrinterPlugin : Plugin() {
                         val address = call.getString("address")
                             ?: throw PrinterException("not_found", "Falta 'address' para transporte bluetooth")
                         bluetooth.print(address, bytes)
+                    }
+                    "ble" -> {
+                        val address = call.getString("address")
+                            ?: throw PrinterException("not_found", "Falta 'address' para transporte ble")
+                        ble.print(address, bytes)
                     }
                     "tunnel" -> {
                         val tHost = call.getString("host")
@@ -436,6 +512,7 @@ class ThermalPrinterPlugin : Plugin() {
         }
         "tcp" -> "tcp:${t.getString("host")}:${intOrNull(t, "port") ?: 9100}"
         "bluetooth" -> "bt:${t.getString("address")}"
+        "ble" -> "ble:${t.getString("address")}"
         else -> "invalid"
     }
 
@@ -452,6 +529,11 @@ class ThermalPrinterPlugin : Plugin() {
                 val addr = t.getString("address")
                     ?: throw PrinterException("not_found", "Falta 'address' en destino publicado")
                 bluetooth.print(addr, bytes)
+            }
+            "ble" -> {
+                val addr = t.getString("address")
+                    ?: throw PrinterException("not_found", "Falta 'address' en destino publicado")
+                ble.print(addr, bytes)
             }
             else -> throw PrinterException("invalid_transport", "Transporte inválido en destino publicado")
         }

@@ -1,6 +1,7 @@
 package app.devlas.plugins.thermalprinter
 
 import android.annotation.SuppressLint
+import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
 import android.content.Context
 import com.getcapacitor.JSArray
@@ -58,6 +59,16 @@ class BluetoothTransport(private val context: Context) {
             obj.put("transport", "bluetooth")
             obj.put("address", device.address)
             obj.put("name", device.name ?: device.address)
+            // classic | le | dual. Un dual tiene SPP, que es mas estable y rapido que BLE.
+            obj.put(
+                "kind",
+                when (device.type) {
+                    BluetoothDevice.DEVICE_TYPE_CLASSIC -> "classic"
+                    BluetoothDevice.DEVICE_TYPE_LE -> "le"
+                    BluetoothDevice.DEVICE_TYPE_DUAL -> "dual"
+                    else -> "unknown"
+                },
+            )
             result.put(obj)
         }
         return result

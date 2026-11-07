@@ -1,6 +1,6 @@
 # @devlas/capacitor-thermal-printer
 
-Adaptador universal de impresión térmica **ESC/POS** para Capacitor: **USB (OTG)**, **TCP/LAN/WiFi** y **Bluetooth SPP** en Android; **TCP/LAN/WiFi** en iOS — una sola API de bytes crudos en ambas plataformas.
+Adaptador universal de impresión térmica **ESC/POS** para Capacitor: **USB (OTG)**, **TCP/LAN/WiFi**, **Bluetooth SPP** y **Bluetooth Low Energy (BLE)** en Android; **TCP/LAN/WiFi** en iOS — una sola API de bytes crudos en ambas plataformas.
 
 - **Bytes crudos, no formateo**: la app codifica el ticket ESC/POS (con su propio encoder) y el plugin solo lo transporta. Así el mismo encoder sirve para Electron, Web Serial, WebUSB y esta app nativa.
 - **Stateless**: cada `print()` conecta → escribe → cierra. Sin estado de conexión que se corrompa.
@@ -41,6 +41,18 @@ const { devices } = await ThermalPrinter.list({ transport: 'bluetooth' })
 // [{ transport: 'bluetooth', address: '66:22:...', name: 'PT-210' }]
 // (solo emparejados — la impresora se empareja desde Ajustes del sistema)
 ```
+
+### `scan({ transport: 'ble', timeoutMs? })`
+
+Busca impresoras Bluetooth Low Energy cercanas (las que anuncian nombre), la más cercana primero. Las BLE no se emparejan en Ajustes, por eso `list('bluetooth')` no las ve. Pide el permiso si falta.
+
+```ts
+const { devices } = await ThermalPrinter.scan({ transport: 'ble', timeoutMs: 5000 })
+// [{ transport: 'ble', address: 'DC:0D:...', name: 'SP-POS8811A', rssi: -48 }]
+await ThermalPrinter.print({ transport: 'ble', address: devices[0].address, data })
+```
+
+`list('bluetooth')` devuelve además `kind: 'classic' | 'le' | 'dual'`. Si una impresora es `dual`, imprime por `bluetooth` (SPP), que es más estable y rápido.
 
 ### `requestPermission(target)`
 

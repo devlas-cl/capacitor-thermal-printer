@@ -32,6 +32,10 @@ export class ThermalPrinterWeb extends WebPlugin implements ThermalPrinterPlugin
     throw this.unimplemented('Solo Android. En navegador usa WebUSB o Web Serial.')
   }
 
+  async scan(_options: { transport: 'ble'; timeoutMs?: number }): Promise<{ devices: PrinterDevice[] }> {
+    throw this.unimplemented('Solo Android. En navegador usa Web Bluetooth.')
+  }
+
   async discover(): Promise<{ devices: DiscoveredNetworkPrinter[] }> {
     throw this.unimplemented('Solo Android. En navegador el descubrimiento LAN no está disponible.')
   }
