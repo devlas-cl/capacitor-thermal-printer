@@ -13,6 +13,7 @@ public class ThermalPrinterPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "ThermalPrinter"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "list", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "scan", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "requestPermission", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "print", returnType: CAPPluginReturnPromise)
     ]
@@ -32,16 +33,24 @@ public class ThermalPrinterPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    // ── scan ─────────────────────────────────────────────────────────────
+    // BLE en iOS es viable (CoreBluetooth no exige MFi) pero aun no esta
+    // implementado. Rechazo explicito para que la app lo trate como "no disponible".
+
+    @objc func scan(_ call: CAPPluginCall) {
+        call.reject("BLE aun no disponible en iOS", "unavailable")
+    }
+
     // ── requestPermission ────────────────────────────────────────────────
 
     @objc func requestPermission(_ call: CAPPluginCall) {
         switch call.getString("transport") {
         case "tcp":
             call.resolve(["granted": true])
-        case "usb", "bluetooth":
+        case "usb", "bluetooth", "ble":
             call.reject("USB/Bluetooth no disponibles en iOS sin certificación MFi", "unavailable")
         default:
-            call.reject("transport debe ser 'usb', 'tcp' o 'bluetooth'", "invalid_transport")
+            call.reject("transport debe ser 'usb', 'tcp', 'bluetooth' o 'ble'", "invalid_transport")
         }
     }
 
@@ -74,10 +83,10 @@ public class ThermalPrinterPlugin: CAPPlugin, CAPBridgedPlugin {
                     }
                 }
             }
-        case "usb", "bluetooth":
+        case "usb", "bluetooth", "ble":
             call.reject("USB/Bluetooth no disponibles en iOS sin certificación MFi", "unavailable")
         default:
-            call.reject("transport debe ser 'usb', 'tcp' o 'bluetooth'", "invalid_transport")
+            call.reject("transport debe ser 'usb', 'tcp', 'bluetooth' o 'ble'", "invalid_transport")
         }
     }
 }

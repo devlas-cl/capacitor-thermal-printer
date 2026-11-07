@@ -6,7 +6,7 @@
  * en todas las plataformas (Electron, Web Serial, WebUSB y esta app nativa).
  */
 
-export type PrinterTransport = 'usb' | 'tcp' | 'bluetooth'
+export type PrinterTransport = 'usb' | 'tcp' | 'bluetooth' | 'ble'
 
 export interface PrinterDevice {
   transport: PrinterTransport
@@ -22,8 +22,19 @@ export interface PrinterDevice {
   /** true si Android ya otorgó permiso USB a este dispositivo. */
   hasPermission?: boolean
   // ── Bluetooth ──
-  /** Dirección MAC del dispositivo emparejado. */
+  /**
+   * Bluetooth clásico: MAC del dispositivo emparejado. BLE: MAC que reportó `scan`.
+   * Tratar como string opaco (en iOS será un UUID, no una MAC).
+   */
   address?: string
+  /**
+   * Solo `list('bluetooth')`: qué radio tiene. Un `dual` imprime por SPP
+   * (`bluetooth`), que es más estable y rápido que BLE; un `le` solo se
+   * alcanza con `transport: 'ble'`.
+   */
+  kind?: 'classic' | 'le' | 'dual' | 'unknown'
+  /** Solo `scan`: intensidad de señal en dBm (más cercano a 0 = más cerca). */
+  rssi?: number
 }
 
 /** Impresora de red descubierta en la LAN (mDNS / barrido). */
@@ -79,7 +90,18 @@ export interface TunnelTarget {
   token?: string
 }
 
-export type PrintTarget = UsbTarget | TcpTarget | BluetoothTarget | TunnelTarget
+/**
+ * Impresora Bluetooth Low Energy (GATT). Sirve para las térmicas que no tienen
+ * SPP ("BLE ACL" al emparejar). No requiere emparejar en Ajustes: se encuentra
+ * con `scan`. El plugin descubre solo la característica de escritura.
+ */
+export interface BleTarget {
+  transport: 'ble'
+  /** Dirección que devolvió `scan` (string opaco). */
+  address: string
+}
+
+export type PrintTarget = UsbTarget | TcpTarget | BluetoothTarget | BleTarget | TunnelTarget
 
 /** Una impresora local que este dispositivo publica al correr como host. */
 export interface PublishedHostPrinter {
@@ -88,7 +110,7 @@ export interface PublishedHostPrinter {
   /** Nombre para mostrar en el cliente ("Boletas", "Comandas"). */
   label: string
   /** El destino local concreto donde el host imprime este id (usb/tcp/bt). */
-  target: UsbTarget | TcpTarget | BluetoothTarget
+  target: UsbTarget | TcpTarget | BluetoothTarget | BleTarget
 }
 
 /** Un host de impresion descubierto en la LAN por mDNS. */
@@ -153,6 +175,13 @@ export interface ThermalPrinterPlugin {
   list(options: { transport: 'usb' | 'bluetooth' }): Promise<{ devices: PrinterDevice[] }>
 
   /**
+   * Busca impresoras BLE cercanas (solo las que anuncian nombre), la más cercana
+   * primero. Es el equivalente de `list` para BLE, que no usa el emparejado del
+   * sistema. Pide el permiso Bluetooth si falta. `timeoutMs` default 5 s (1 a 30 s).
+   */
+  scan(options: { transport: 'ble'; timeoutMs?: number }): Promise<{ devices: PrinterDevice[] }>
+
+  /**
    * Descubre impresoras de red en la LAN — el equivalente de red a `list`.
    * Combina mDNS (nombres reales de las que se anuncian) con un barrido del
    * puerto 9100 sobre la subred /24 (cubre las que no anuncian).
@@ -165,7 +194,8 @@ export interface ThermalPrinterPlugin {
   /**
    * Pide el permiso del transporte. USB: diálogo del sistema por dispositivo
    * (persiste hasta desconectar, o siempre si el usuario marca "usar por defecto").
-   * Bluetooth: permiso runtime BLUETOOTH_CONNECT (API 31+). TCP: siempre granted.
+   * Bluetooth: permiso runtime BLUETOOTH_CONNECT (API 31+). BLE: BLUETOOTH_SCAN y
+   * BLUETOOTH_CONNECT (API 31+) o ubicación (API 30 o menos). TCP: siempre granted.
    */
   requestPermission(options: PrintTarget): Promise<{ granted: boolean }>
 
